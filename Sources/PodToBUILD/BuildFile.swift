@@ -44,14 +44,17 @@ public func makeLoadNodes(forConvertibles skylarkConvertibles: [SkylarkConvertib
     let hasSwift = skylarkConvertibles.first(where: { $0 is SwiftLibrary }) != nil
     let hasAppleBundleImport = skylarkConvertibles.first(where: { $0 is AppleBundleImport }) != nil
     let hasAppleResourceBundle = skylarkConvertibles.first(where: { $0 is AppleResourceBundle }) != nil
-    let hasAppleFrameworkImport = skylarkConvertibles.first(where: { $0 is AppleFrameworkImport }) != nil
-    let appleFrameworkImport = appleFrameworkImport(isDynamicFramework: GetBuildOptions().isDynamicFramework, isXCFramework: GetBuildOptions().isXCFramework)
+    let hasAppleFrameworkImport = skylarkConvertibles.first(where: { ($0 as? AppleFrameworkImport)?.isXCFramework == false }) != nil
+    let hasAppleXCFrameworkImport = skylarkConvertibles.first(where: { ($0 as? AppleFrameworkImport)?.isXCFramework == true }) != nil
+    let appleFrameworkImportString = appleFrameworkImport(isDynamicFramework: GetBuildOptions().isDynamicFramework, isXCFramework: false)
+    let appleXCFrameworkImportString = appleFrameworkImport(isDynamicFramework: GetBuildOptions().isDynamicFramework, isXCFramework: true)
     
     return .lines( [
         hasSwift ?  SkylarkNode.skylark("load('@build_bazel_rules_swift//swift:swift.bzl', 'swift_library')") : nil,
         hasAppleBundleImport ?  SkylarkNode.skylark("load('@build_bazel_rules_apple//apple:resources.bzl', 'apple_bundle_import')") : nil,
         hasAppleResourceBundle ?  SkylarkNode.skylark("load('@build_bazel_rules_apple//apple:resources.bzl', 'apple_resource_bundle')") : nil,
-        hasAppleFrameworkImport ? SkylarkNode.skylark("load('@build_bazel_rules_apple//apple:apple.bzl', '\(appleFrameworkImport)')") : nil,
+        hasAppleFrameworkImport ? SkylarkNode.skylark("load('@build_bazel_rules_apple//apple:apple.bzl', '\(appleFrameworkImportString)')") : nil,
+        hasAppleXCFrameworkImport ? SkylarkNode.skylark("load('@build_bazel_rules_apple//apple:apple.bzl', '\(appleXCFrameworkImportString)')") : nil,
         ].compactMap { $0 }
     )
 }

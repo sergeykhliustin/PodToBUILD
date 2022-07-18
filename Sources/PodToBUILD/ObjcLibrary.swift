@@ -92,9 +92,16 @@ public struct ConfigSetting: BazelTarget {
 public struct AppleFrameworkImport: BazelTarget {
     public let name: String // A unique name for this rule.
     public let frameworkImport: AttrSet<String> // The list of files under a .framework directory which are provided to Objective-C targets that depend on this target.
+    public let isXCFramework: Bool
 
     public var acknowledged: Bool {
         return true
+    }
+
+    public init(name: String, frameworkImport: AttrSet<String>) {
+        self.name = name
+        self.frameworkImport = frameworkImport
+        self.isXCFramework = frameworkImport.basic?.hasSuffix("xcframework") == true
     }
 
     // apple_static_framework_import(
@@ -105,7 +112,6 @@ public struct AppleFrameworkImport: BazelTarget {
     //     visibility = ["visibility:public"]
     // )
     public func toSkylark() -> SkylarkNode {
-        let isXCFramework = GetBuildOptions().isXCFramework
         let appleFrameworkImport = appleFrameworkImport(isDynamicFramework: GetBuildOptions().isDynamicFramework, isXCFramework: isXCFramework)
         
         return SkylarkNode.functionCall(

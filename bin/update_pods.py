@@ -313,9 +313,7 @@ def _update_repo_impl(invocation_info):
                 "--generate_header_map",
                 _cli_bool(repository_ctx.generate_header_map),
                 "--is_dynamic_framework",
-                _cli_bool(repository_ctx.is_dynamic_framework),
-                "--is_xcframework",
-                _cli_bool(repository_ctx.is_xcframework)
+                _cli_bool(repository_ctx.is_dynamic_framework)
             ])
 
             for child_pod in invocation_info.child_pods:

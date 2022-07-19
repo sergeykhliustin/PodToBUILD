@@ -39,8 +39,24 @@ public struct XCConfigTransformer {
         guard let transformer = registry[key] else {
             throw XCConfigValueTransformerError.unimplemented
         }
+        // Instead of splitting by whitespaces we also want to handle cases like "SOMEKEY=\"SOME VALUE\""
+        let allValues = value
+            .components(separatedBy: "=\"")
+            .map {
+                let components = $0.components(separatedBy: "\"")
+                guard components.count == 2 else {
+                    return $0
+                }
+                let modifiedValue = [
+                    components.first?.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "",
+                    components.dropFirst().joined()
+                ].joined(separator: "\\\"")
+                return modifiedValue
+            }
+            .joined(separator: "=\\\"")
+            .components(separatedBy: .whitespaces)
+            .map { $0.removingPercentEncoding ?? "" }
 
-        let allValues = value.components(separatedBy: CharacterSet.whitespaces)
         return allValues.filter { $0 != "$(inherited)" }
             .compactMap { val in
                 let podDir = getPodBaseDir()
@@ -73,20 +89,19 @@ public struct XCConfigTransformer {
         ])
     }
 
-    public func compilerFlags(forXCConfig xcconfig: [String: String]?) -> [String] {
-        if let xcconfig = xcconfig {
-            return xcconfig.keys
+    public func compilerFlags(forXCConfig xcconfig: AttrSet<[String: String]>) -> AttrSet<[String]> {
+        return xcconfig.map({ config in
+            return config.keys
                 .sorted(by: <)
                 .compactMap {
                     key -> [String]? in
-                    guard let value = xcconfig[key] else {
+                    guard let value = config[key] else {
                         return nil
                     }
                     return try? compilerFlag(forXCConfigKey: key, XCConfigValue: value)
                 }
                 .flatMap { $0 }
-        }
-        return [String]()
+        })
     }
 }
 
@@ -218,14 +233,11 @@ public struct CXXLibraryTransformer: XCConfigValueTransformer {
 }
 
 extension XCConfigTransformer {
-    func compilerFlags(for spec: FallbackSpec) -> [String] {
-        /// TODO: This operation should operate on the AttrSet
-        return self.compilerFlags(forXCConfig:
-                spec.attr(\.podTargetXcconfig).basic ?? [:]) +
-            self.compilerFlags(forXCConfig:
-                spec.attr(\.userTargetXcconfig).basic ?? [:]) +
-            self.compilerFlags(forXCConfig:
-                spec.attr(\.xcconfig).basic ?? [:])
+    func compilerFlags(for spec: FallbackSpec) -> AttrSet<[String]> {
+        let xcconfig = spec.attr(\.podTargetXcconfig).map({ $0 ?? [:]})
+        <> spec.attr(\.userTargetXcconfig).map({ $0 ?? [:] })
+        <> spec.attr(\.xcconfig).map({ $0 ?? [:] })
+        return self.compilerFlags(forXCConfig: xcconfig)
     }
 }
 

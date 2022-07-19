@@ -280,16 +280,18 @@ public struct PodBuildFile: SkylarkConvertible {
 
         let includes = ObjcLibrary(parentSpecs: parentSpecs, spec:
             spec).includes
-        let hadImportedModuleMap = includes.reduce(into: false) {
-            accum, next in
+
+        let hadImportedModuleMap = includes.trivialize(into: false) { accum, next in
             // Note: for now we replace these module maps. There is a few issues
             // with accepting use provided module maps with static librares.
             // Assume that the headers are modular. This isn't gaurenteed,
             // however, CocoaPods does generate a module map with these headers.
-            let moduleMapPath = "../../" + next + "/module.modulemap"
-            if FileManager.default.fileExists(atPath: moduleMapPath) {
-                try? FileManager.default.removeItem(atPath: moduleMapPath)
-                accum = true
+            accum = accum || next.reduce(into: accum) { accum, next in
+                let moduleMapPath = "../../" + next + "/module.modulemap"
+                if FileManager.default.fileExists(atPath: moduleMapPath) {
+                    try? FileManager.default.removeItem(atPath: moduleMapPath)
+                    accum = true
+                }
             }
         }
 

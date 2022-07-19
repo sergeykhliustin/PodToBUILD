@@ -164,7 +164,7 @@ public struct ObjcLibrary: BazelTarget, UserConfigurable, SourceExcludable {
     public let headers: AttrSet<GlobNode>
     public let headerName: AttrSet<String>
     public let moduleMap: ModuleMap?
-    public let includes: [String]
+    public let includes: AttrSet<[String]>
     public let weakSdkFrameworks: AttrSet<[String]>
     public let sdkDylibs: AttrSet<[String]>
     public let bundles: AttrSet<[String]>
@@ -192,7 +192,7 @@ public struct ObjcLibrary: BazelTarget, UserConfigurable, SourceExcludable {
         headerName: AttrSet<String> = AttrSet.empty,
         moduleMap: ModuleMap? = nil,
         prefixHeader: AttrSet<String?> = AttrSet.empty,
-        includes: [String] = [],
+        includes: AttrSet<[String]> = AttrSet.empty,
         sdkFrameworks: AttrSet<[String]> = AttrSet.empty,
         weakSdkFrameworks: AttrSet<[String]> = AttrSet.empty,
         sdkDylibs: AttrSet<[String]> = AttrSet.empty,
@@ -276,8 +276,7 @@ public struct ObjcLibrary: BazelTarget, UserConfigurable, SourceExcludable {
         let xcconfigFlags = XCConfigTransformer.defaultTransformer(
             externalName: externalName, sourceType: sourceType)
             .compilerFlags(for: fallbackSpec)
-
-        let xcconfigCopts = xcconfigFlags.filter { !$0.hasPrefix("-I") }
+        let xcconfigCopts = xcconfigFlags.map({ $0.filter({ !$0.hasPrefix("-I") }) })
         let moduleName: AttrSet<String> = fallbackSpec.attr(\.moduleName).map {
             $0 ?? ""
         }
@@ -300,9 +299,12 @@ public struct ObjcLibrary: BazelTarget, UserConfigurable, SourceExcludable {
             return [getPodBaseDir() + "/" + podName + "/" + PodSupportSystemPublicHeaderDir]
         }
 
-        includes = xcconfigFlags.filter { $0.hasPrefix("-I") }.map {
-            String($0.dropFirst(2))
-        } + includePodHeaderDirs()
+        includes = xcconfigFlags.map({
+            $0.filter({ $0.hasPrefix("-I") })
+                .map({ String($0.dropFirst(2)) })
+            + includePodHeaderDirs()
+        })
+
         self.headerName = headerName
 
         // If the subspec has a prefix header than use that
@@ -404,7 +406,7 @@ public struct ObjcLibrary: BazelTarget, UserConfigurable, SourceExcludable {
         copts = AttrSet(basic: moduleMap != nil ? [
                 "-I$(GENDIR)/\(getGenfileOutputBaseDir())/"] : []) <>
             extraCopts <>
-            AttrSet(basic: xcconfigCopts) <>
+            xcconfigCopts <>
             fallbackSpec.attr(\.compilerFlags)
 
         features = AttrSet.empty
@@ -815,7 +817,7 @@ public struct ObjcLibrary: BazelTarget, UserConfigurable, SourceExcludable {
             ]
         ))
 
-        if lib.includes.count > 0 {
+        if !lib.includes.filter({ $0.count > 0 }).isEmpty {
             inlineSkylark.append(.functionCall(
                 name: "gen_includes",
                 arguments: [
@@ -888,7 +890,7 @@ public struct ObjcLibrary: BazelTarget, UserConfigurable, SourceExcludable {
         if !lib.deps.isEmpty {
             allDeps = lib.deps.map { Set($0).sorted(by: (<)) } .toSkylark()
         }
-        if lib.includes.count > 0 {
+        if !lib.includes.filter({ $0.count > 0 }).isEmpty {
             allDeps = allDeps .+. [":\(name)_includes"].toSkylark()
         }
         if options.generateHeaderMap {
@@ -936,10 +938,8 @@ public struct ObjcLibrary: BazelTarget, UserConfigurable, SourceExcludable {
                     "-I.",
                 ]
             }
-            let podInclude = lib.includes.first(where: {
-                $0.contains(PodSupportSystemPublicHeaderDir)
-            })
-            guard podInclude != nil else { return [] }
+            let podInclude = lib.includes.filter({ $0.contains(PodSupportSystemPublicHeaderDir) })
+            guard !podInclude.isEmpty else { return [] }
 
             let headerDirs = self.headerName.map { PodSupportSystemPublicHeaderDir + "\($0)/" }
             let headerSearchPaths: Set<String> = Set(headerDirs.fold(

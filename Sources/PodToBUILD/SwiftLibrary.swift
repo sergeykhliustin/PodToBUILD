@@ -158,18 +158,18 @@ public struct SwiftLibrary: BazelTarget {
             externalName: externalName, sourceType: .objc)
             .compilerFlags(for: fallbackSpec)
 
-        let includes = objcFlags.filter { $0.hasPrefix("-I") }
-
         // Insert the clang import flags
         // This adds -DCOCOAPODS and -DCOCOAPODS=1 to the clang importer ( via
         // -Xcc ) - by doing this, clang sees -DCOCOAPODS=1. I'm not 100% sure
         // why it doesn't pass -DCOCOAPODS=1 to swift, but this is the behavior
         // in Xcode make it identical
-        let clangImporterCopts = (includes + ["-DCOCOAPODS=1"])
-            .reduce([String]()) { $0 + ["-Xcc", $1] }
-        self.copts = AttrSet(basic: [
-            "-DCOCOAPODS",
-        ] + swiftFlags + clangImporterCopts)
+
+        let clangImporterCopts = objcFlags.map({
+            ($0.filter({ $0.hasPrefix("-I") }) + ["-DCOCOAPODS=1"])
+                .reduce([String()]) { $0 + ["-Xcc", $1] }
+        })
+
+        self.copts = AttrSet(basic: ["-DCOCOAPODS"]) <> swiftFlags <> clangImporterCopts
 
         self.swiftcInputs = AttrSet.empty
         self.moduleMap = moduleMap

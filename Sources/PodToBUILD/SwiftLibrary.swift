@@ -273,7 +273,7 @@ public struct SwiftLibrary: BazelTarget {
                 .named(name: "data", value: data.toSkylark()),
                 .named(name: "copts", value: coptsSkylark),
                 .named(name: "swiftc_inputs", value: swiftcInputs.toSkylark()),
-                .named(name: "generated_header_name", value: (externalName + "-Swift.h").toSkylark()),
+                .named(name: "generated_header_name", value: (moduleName + "-Swift.h").toSkylark()),
                 .named(name: "generates_header", value: SkylarkNode.bool(true)),
                 .named(name: "features", value: ["swift.no_generated_module_map"].toSkylark()),
                 .named(name: "visibility", value: ["//visibility:public"].toSkylark()),

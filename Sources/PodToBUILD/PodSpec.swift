@@ -95,6 +95,8 @@ import Foundation
 
 public enum PodSpecField: String {
     case name
+    case swiftVersion = "swift_version"
+    case swiftVersions = "swift_versions"
     case frameworks
     case weakFrameworks = "weak_frameworks"
     case excludeFiles = "exclude_files"
@@ -129,6 +131,7 @@ public enum PodSpecField: String {
 
 public protocol PodSpecRepresentable {
     var name: String { get }
+    var swiftVersions: Set<String>? { get }
     var podTargetXcconfig: [String: String]? { get }
     var userTargetXcconfig: [String: String]? { get }
     var sourceFiles: [String] { get }
@@ -158,6 +161,7 @@ public protocol PodSpecRepresentable {
 
 public struct PodSpec: PodSpecRepresentable {
     public let name: String
+    public let swiftVersions: Set<String>?
     public let sourceFiles: [String]
     public let excludeFiles: [String]
     public let frameworks: [String]
@@ -286,6 +290,18 @@ public struct PodSpec: PodSpecRepresentable {
         osx = (fieldMap[.osx] as? JSONDict).flatMap { try? PodSpec(JSONPodspec: $0) }
         tvos = (fieldMap[.tvos] as? JSONDict).flatMap { try? PodSpec(JSONPodspec: $0) }
         watchos = (fieldMap[.watchos] as? JSONDict).flatMap { try? PodSpec(JSONPodspec: $0) }
+        var resultSwiftVersions = Set<String>()
+        if let swiftVersions = fieldMap[.swiftVersions] as? String {
+            resultSwiftVersions.insert(swiftVersions)
+        } else if let swiftVersions = fieldMap[.swiftVersions] as? [String] {
+            swiftVersions.forEach {
+                resultSwiftVersions.insert($0)
+            }
+        }
+        if let swiftVersion = fieldMap[.swiftVersion] as? String {
+            resultSwiftVersions.insert(swiftVersion)
+        }
+        self.swiftVersions = !resultSwiftVersions.isEmpty ? resultSwiftVersions : nil
     }
 }
 

@@ -48,6 +48,21 @@ public struct SwiftLibrary: BazelTarget {
         self.data = data
     }
 
+    public static func resolveSwiftVersion(spec: FallbackSpec) -> AttrSet<String?> {
+        return spec.attr(\.swiftVersions).map {
+            if let versions = $0?.compactMap({ Double($0) }) {
+                if versions.contains(where: { $0 >= 5.0 }) {
+                    return "5"
+                } else if versions.contains(where: { $0 >= 4.2 }) {
+                    return "4.2"
+                } else if !versions.isEmpty {
+                    return "4"
+                }
+            }
+            return nil
+        }
+    }
+
     public static func hasSwiftSources(spec: PodSpec) -> Bool {
         return SwiftLibrary.getSources(spec: spec).hasSourcesOnDisk()
     }
@@ -150,6 +165,10 @@ public struct SwiftLibrary: BazelTarget {
             }
         }
 
+        let swiftVersion = Self.resolveSwiftVersion(spec: fallbackSpec)
+            .denormalize()
+            .map({ ["-swift-version", $0] })
+
         let swiftFlags = XCConfigTransformer.defaultTransformer(
             externalName: externalName, sourceType: .swift)
             .compilerFlags(for: fallbackSpec)
@@ -169,7 +188,7 @@ public struct SwiftLibrary: BazelTarget {
                 .reduce([String()]) { $0 + ["-Xcc", $1] }
         })
 
-        self.copts = AttrSet(basic: ["-DCOCOAPODS"]) <> swiftFlags <> clangImporterCopts
+        self.copts = AttrSet(basic: ["-DCOCOAPODS"]) <> swiftFlags <> clangImporterCopts <> swiftVersion
 
         self.swiftcInputs = AttrSet.empty
         self.moduleMap = moduleMap

@@ -741,11 +741,18 @@ public struct ObjcLibrary: BazelTarget, UserConfigurable, SourceExcludable {
                 ]
             ))
 
+        // TODO: We should exclude existing umbrella header from public headers
+        let publicHeaders = lib.publicHeaders.map({ value -> GlobNode in
+            var exclude: [Either<Set<String>, GlobNode>] = value.exclude
+            exclude += [Either.left(Set(["**/\(name).h"]))]
+            return GlobNode(include: value.include, exclude: exclude)
+        })
+
         inlineSkylark.append(.functionCall(
             name: "filegroup",
             arguments: [
                 .named(name: "name", value: (name + "_public_hdrs").toSkylark()),
-                .named(name: "srcs", value: lib.publicHeaders.toSkylark() .+. depPublicHdrs.toSkylark()),
+                .named(name: "srcs", value: publicHeaders.toSkylark() .+. depPublicHdrs.toSkylark()),
                 .named(name: "visibility", value: ["//visibility:public"].toSkylark()),
                 ]
             ))

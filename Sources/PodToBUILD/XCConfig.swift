@@ -17,6 +17,7 @@
 import Foundation
 
 public protocol XCConfigValueTransformer {
+    func xcconfigValue(forXCConfigValue value: String) -> String?
     func string(forXCConfigValue value: String) -> String?
     var xcconfigKey: String { get }
 }
@@ -32,6 +33,43 @@ public struct XCConfigTransformer {
         var registry = [String: XCConfigValueTransformer]()
         transformers.forEach { registry[$0.xcconfigKey] = $0 }
         self.registry = registry
+    }
+
+    func xcconfig(forXCConfigKey key: String, XCConfigValue value: String) throws -> String {
+        guard let transformer = registry[key] else {
+            throw XCConfigValueTransformerError.unimplemented
+        }
+        let allValues = value
+            .components(separatedBy: "=\"")
+            .map {
+                let components = $0.components(separatedBy: "\"")
+                guard components.count == 2 else {
+                    return $0
+                }
+                let modifiedValue = [
+                    components.first?.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "",
+                    components.dropFirst().joined()
+                ].joined(separator: "\\\"")
+                return modifiedValue
+            }
+            .joined(separator: "=\\\"")
+            .components(separatedBy: .whitespaces)
+            .map { $0.removingPercentEncoding ?? "" }
+        return allValues
+            .filter { $0 != "$(inherited)" }
+            .compactMap { val in
+                let podDir = getPodBaseDir()
+                let targetDir = getGenfileOutputBaseDir()
+                return transformer.xcconfigValue(forXCConfigValue: val)?
+                    .replacingOccurrences(of: "$(PODS_ROOT)", with: podDir)
+                    .replacingOccurrences(of: "${PODS_ROOT}", with: podDir)
+                    .replacingOccurrences(of: "$(PODS_TARGET_SRCROOT)", with: targetDir)
+                    .replacingOccurrences(of: "${PODS_TARGET_SRCROOT}", with: targetDir)
+//                    .replacingOccurrences(of: "\\\"", with: "[ESCAPED_QUOTE]")
+//                    .replacingOccurrences(of: "\"", with: "\\\"")
+//                    .replacingOccurrences(of: "[ESCAPED_QUOTE]", with: "\\\"")
+            }
+            .joined(separator: " ")
     }
 
     func compilerFlag(forXCConfigKey key: String, XCConfigValue value: String) throws -> [String] {
@@ -103,6 +141,28 @@ public struct XCConfigTransformer {
                 .flatMap { $0 }
         })
     }
+
+    public func xcconfig(forXCConfig xcconfig: AttrSet<[String: String]>) -> AttrSet<[String: String]> {
+        // TODO: Some compile flags are required to be an array
+        let tempSkippedKeys = [
+            "GCC_PREPROCESSOR_DEFINITIONS",
+            "OTHER_SWIFT_FLAGS",
+            "OTHER_CFLAGS",
+            "SWIFT_INCLUDE_PATHS"
+        ]
+        return xcconfig.map({
+            $0.reduce([String:String]()) { result, element in
+                guard !tempSkippedKeys.contains(element.0) else { return result }
+
+                var result = result
+                let newValue = try? self.xcconfig(forXCConfigKey: element.0, XCConfigValue: element.1)
+                if newValue.isEmpty == false {
+                    result[element.0] = newValue
+                }
+                return result
+            }
+        })
+    }
 }
 
 //  MARK: - Value Transformers
@@ -122,6 +182,10 @@ public struct PassthroughTransformer: XCConfigValueTransformer {
     public func string(forXCConfigValue value: String) -> String? {
         return value
     }
+
+    public func xcconfigValue(forXCConfigValue value: String) -> String? {
+        return value
+    }
 }
 
 public struct PreCompilePrefixHeaderTransformer: XCConfigValueTransformer {
@@ -132,6 +196,10 @@ public struct PreCompilePrefixHeaderTransformer: XCConfigValueTransformer {
     public func string(forXCConfigValue _: String) -> String? {
         // TODO: Implement precompiled header support in Bazel.
         return ""
+    }
+
+    public func xcconfigValue(forXCConfigValue value: String) -> String? {
+        return value
     }
 }
 
@@ -149,6 +217,13 @@ public struct HeaderSearchPathTransformer: XCConfigValueTransformer {
             with: "\(getPodBaseDir())/\(externalName)").replacingOccurrences(of: "\"", with: "")
         return "-I\(cleaned)"
     }
+
+    public func xcconfigValue(forXCConfigValue value: String) -> String? {
+        return value
+            .replacingOccurrences(of: "$(PODS_TARGET_SRCROOT)",
+                                  with: "\(getPodBaseDir())/\(externalName)")
+            .replacingOccurrences(of: "\"", with: "")
+    }
 }
 
 public struct PreprocessorDefinesTransformer: XCConfigValueTransformer {
@@ -158,6 +233,10 @@ public struct PreprocessorDefinesTransformer: XCConfigValueTransformer {
 
     public func string(forXCConfigValue value: String) -> String? {
         return "-D\(value)"
+    }
+
+    public func xcconfigValue(forXCConfigValue value: String) -> String? {
+        return value
     }
 }
 
@@ -169,6 +248,10 @@ public struct AllowNonModularIncludesInFrameworkModulesTransformer: XCConfigValu
     public func string(forXCConfigValue _: String) -> String? {
         return "-Wno-non-modular-include-in-framework-module -Wno-error=noon-modular-include-in-framework-module"
     }
+
+    public func xcconfigValue(forXCConfigValue value: String) -> String? {
+        return value
+    }
 }
 
 public struct SwiftApplicationExtensionAPIOnlyTransformer: XCConfigValueTransformer {
@@ -179,6 +262,10 @@ public struct SwiftApplicationExtensionAPIOnlyTransformer: XCConfigValueTransfor
     public func string(forXCConfigValue value: String) -> String? {
         return value == "YES" || value == "yes" ? "-application-extension" : nil
     }
+
+    public func xcconfigValue(forXCConfigValue value: String) -> String? {
+        return value
+    }
 }
 
 public struct ApplicationExtensionAPIOnlyTransformer: XCConfigValueTransformer {
@@ -188,6 +275,10 @@ public struct ApplicationExtensionAPIOnlyTransformer: XCConfigValueTransformer {
 
     public func string(forXCConfigValue value: String) -> String? {
         return value == "YES" || value == "yes" ? "-fapplication-extension" : nil
+    }
+
+    public func xcconfigValue(forXCConfigValue value: String) -> String? {
+        return value
     }
 }
 
@@ -211,6 +302,10 @@ public struct CXXLanguageStandardTransformer: XCConfigValueTransformer {
         }
         return "-std=\(value)"
     }
+
+    public func xcconfigValue(forXCConfigValue value: String) -> String? {
+        return value
+    }
 }
 
 public struct CXXLibraryTransformer: XCConfigValueTransformer {
@@ -230,14 +325,25 @@ public struct CXXLibraryTransformer: XCConfigValueTransformer {
         }
         return "-stdlib=\(value)"
     }
+
+    public func xcconfigValue(forXCConfigValue value: String) -> String? {
+        return value
+    }
 }
 
-extension XCConfigTransformer {
+public extension XCConfigTransformer {
     func compilerFlags(for spec: FallbackSpec) -> AttrSet<[String]> {
         let xcconfig = spec.attr(\.podTargetXcconfig).map({ $0 ?? [:]})
         <> spec.attr(\.userTargetXcconfig).map({ $0 ?? [:] })
         <> spec.attr(\.xcconfig).map({ $0 ?? [:] })
         return self.compilerFlags(forXCConfig: xcconfig)
+    }
+
+    func xcconfig(for spec: FallbackSpec) -> AttrSet<[String: String]> {
+        let xcconfig = spec.attr(\.podTargetXcconfig).map({ $0 ?? [:]})
+        <> spec.attr(\.userTargetXcconfig).map({ $0 ?? [:] })
+        <> spec.attr(\.xcconfig).map({ $0 ?? [:] })
+        return self.xcconfig(forXCConfig: xcconfig)
     }
 }
 

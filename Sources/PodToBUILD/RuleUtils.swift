@@ -47,11 +47,14 @@ public func extractFiles(fromPattern patternSet: [String],
         }
 }
 
-
 let ObjcLikeFileTypes = Set([".m", ".c", ".s", ".S"])
 let CppLikeFileTypes  = Set([".mm", ".cpp", ".cxx", ".cc"])
 let SwiftLikeFileTypes  = Set([".swift"])
 let HeaderFileTypes = Set([".h", ".hpp", ".hxx"])
+let AnyFileTypes = ObjcLikeFileTypes
+    .union(CppLikeFileTypes)
+    .union(SwiftLikeFileTypes)
+    .union(HeaderFileTypes)
 
 
 public func makeAlias(name: String, actual: String) -> SkylarkNode {
@@ -121,7 +124,14 @@ public func computeLibName(parentSpecs: [PodSpec], spec: PodSpec, podName: Strin
                     .map { $0.moduleName ?? $0.name }
                     .joined(separator: "_")
             )
-    return getNamePrefix() + baseName + splitSuffix
+    let notAllowedNames = ["Swift"]
+    let result = (getNamePrefix() + baseName + splitSuffix)
+    if notAllowedNames.contains(result) {
+        return result + "_" + result
+    }
+    else {
+        return result
+    }
 }
 
 /// Get a dependency name from a name in accordance with

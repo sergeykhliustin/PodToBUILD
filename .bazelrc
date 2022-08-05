@@ -6,6 +6,8 @@ build \
  --swiftcopt=-Xwrapped-swift=-debug-prefix-pwd-is-dot \
  --experimental_strict_action_env=true
 
+build --features=swift.use_global_module_cache
+
 test \
  --spawn_strategy=local \
 

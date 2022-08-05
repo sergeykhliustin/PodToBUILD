@@ -50,6 +50,7 @@ public func makeLoadNodes(forConvertibles skylarkConvertibles: [SkylarkConvertib
     let appleXCFrameworkImportString = appleFrameworkImport(isDynamicFramework: GetBuildOptions().isDynamicFramework, isXCFramework: true)
     
     return .lines( [
+        SkylarkNode.skylark("load('@build_bazel_rules_ios//rules:framework.bzl', 'apple_framework')"),
         hasSwift ?  SkylarkNode.skylark("load('@build_bazel_rules_swift//swift:swift.bzl', 'swift_library')") : nil,
         hasAppleBundleImport ?  SkylarkNode.skylark("load('@build_bazel_rules_apple//apple:resources.bzl', 'apple_bundle_import')") : nil,
         hasAppleResourceBundle ?  SkylarkNode.skylark("load('@build_bazel_rules_apple//apple:resources.bzl', 'apple_resource_bundle')") : nil,
@@ -402,6 +403,40 @@ public struct PodBuildFile: SkylarkConvertible {
         return sourceLibs + (isTopLevelTarget ? moduleMapTargets : [])
     }
 
+    static func makeSourceLibsV2(parentSpecs: [PodSpec], spec: PodSpec,
+            extraDeps: [BazelTarget], isRootSpec: Bool = false) -> [BazelTarget] {
+        var sourceLibs: [BazelTarget] = []
+        let sourceTypes = getSourceTypes(fromPodspec: spec)
+        let rootSpec = parentSpecs.first ?? spec
+        let packageSourceTypes = getSourceTypes(fromPodspec: rootSpec)
+        let fallbackSpec = FallbackSpec(specs: [spec] +  parentSpecs)
+
+        let externalName = getNamePrefix() + (parentSpecs.first?.name ?? spec.name)
+        let moduleName: AttrSet<String> = fallbackSpec.attr(\.moduleName).map {
+            $0 ?? ""
+        }
+        let headerDirectoryName: AttrSet<String?> = fallbackSpec.attr(\.headerDirectory)
+        let headerName = (moduleName.isEmpty ? nil : moduleName) ??
+            (headerDirectoryName.basic == nil ? nil :
+                headerDirectoryName.denormalize()) ?? AttrSet<String>(value:
+                externalName)
+        let clangModuleName = headerName.basic?.replacingOccurrences(of: "-", with: "_") ?? ""
+        let isTopLevelTarget = parentSpecs.isEmpty
+        let options = GetBuildOptions()
+
+        let podName = GetBuildOptions().podName
+        let rootName = computeLibName(parentSpecs: [], spec: rootSpec, podName:
+            podName, isSplitDep: false, sourceType: .objc)
+
+        sourceLibs.append(AppleFramework(parentSpecs: parentSpecs,
+                                         spec: spec,
+                                         extraDeps: extraDeps.map { $0.name },
+                                         isSplitDep: false))
+
+
+        return sourceLibs
+    }
+
     private static func makeSubspecTargets(parentSpecs: [PodSpec], spec: PodSpec) -> [BazelTarget] {
         let bundles: [BazelTarget] = bundleLibraries(withPodSpec: spec)
         let libraries = vendoredLibraries(withPodspec: spec)
@@ -410,7 +445,7 @@ public struct PodBuildFile: SkylarkConvertible {
         let extraDeps: [BazelTarget] = (
                 (libraries as [BazelTarget]) +
                         (frameworks as [BazelTarget]))
-        let sourceLibs = makeSourceLibs(parentSpecs: parentSpecs, spec: spec,
+        let sourceLibs = makeSourceLibsV2(parentSpecs: parentSpecs, spec: spec,
                 extraDeps: extraDeps)
 
         let subspecTargets = spec.subspecs.flatMap {
@@ -449,7 +484,7 @@ public struct PodBuildFile: SkylarkConvertible {
                     defaultSubspecTargets) + extraDeps)
             .filter { !($0 is AppleResourceBundle || $0 is AppleBundleImport) }
 
-        let sourceLibs = makeSourceLibs(parentSpecs: [], spec: podSpec, extraDeps:
+        let sourceLibs = makeSourceLibsV2(parentSpecs: [], spec: podSpec, extraDeps:
                 allRootDeps)
 
         var output: [BazelTarget] = sourceLibs + subspecTargets +
@@ -461,9 +496,6 @@ public struct PodBuildFile: SkylarkConvertible {
         output = RedundantCompiledSourceTransform.transform(convertibles: output,
                                                             options: buildOptions,
                                                             podSpec: podSpec)
-        output = InsertAcknowledgementsTransform.transform(convertibles: output,
-                                                           options: buildOptions,
-                                                           podSpec: podSpec)
         output = EmptyDepPruneTransform.transform(convertibles: output,
                                                            options: buildOptions,
                                                            podSpec: podSpec)

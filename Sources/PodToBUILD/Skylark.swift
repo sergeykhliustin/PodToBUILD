@@ -74,6 +74,8 @@ extension SkylarkNode: Monoid, EmptyAwareness {
     public var isEmpty: Bool {
         switch self {
         case let .list(xs): return xs.isEmpty
+        case let .dict(dict): return dict.isEmpty
+        case let .string(string): return string.isEmpty
         default: return false
         }
     }

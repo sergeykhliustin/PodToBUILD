@@ -197,9 +197,10 @@ public struct PodBuildFile: SkylarkConvertible {
         []) + (bundleResources.basic ?? []) + (bundleResources.multi.ios ?? [])).sorted { $0.name < $1.name }
     }
 
-    private static func vendoredFrameworks(withPodspec spec: PodSpec) -> [BazelTarget] {
+    private static func vendoredFrameworks(withPodspec spec: PodSpec, deps: [PodSpec] = []) -> [BazelTarget] {
         // TODO: Make frameworks AttrSet
-        let frameworks = spec.attr(\.vendoredFrameworks).map {
+        let vendoredFrameworks = AppleFramework.collectAttribute(from: spec, subspecs: deps + spec.selectedSubspecs(), keyPath: \.vendoredFrameworks)
+        let frameworks = vendoredFrameworks.map {
             $0.map {
                 let frameworkName = URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent
                 return AppleFrameworkImport(name: "\(spec.moduleName ?? spec.name)_\(frameworkName)_VendoredFrameworks",
@@ -430,8 +431,7 @@ public struct PodBuildFile: SkylarkConvertible {
 
         sourceLibs.append(AppleFramework(parentSpecs: parentSpecs,
                                          spec: spec,
-                                         extraDeps: extraDeps.map { $0.name },
-                                         isSplitDep: false))
+                                         extraDeps: extraDeps.map { $0.name }))
 
 
         return sourceLibs
@@ -439,8 +439,16 @@ public struct PodBuildFile: SkylarkConvertible {
 
     private static func makeSubspecTargets(parentSpecs: [PodSpec], spec: PodSpec) -> [BazelTarget] {
         let bundles: [BazelTarget] = bundleLibraries(withPodSpec: spec)
+        var podSpecDeps: [PodSpec] = spec.dependencies.compactMap({
+            let splitted = $0.split(separator: "/")
+            guard splitted.count == 2 else { return nil }
+            let podName = splitted[0]
+            let depName = splitted[1]
+            return parentSpecs.first(where: { $0.name == podName })?.subspecs.first(where: { $0.name == depName })
+        })
+
         let libraries = vendoredLibraries(withPodspec: spec)
-        let frameworks = vendoredFrameworks(withPodspec: spec)
+        let frameworks = vendoredFrameworks(withPodspec: spec, deps: podSpecDeps)
 
         let extraDeps: [BazelTarget] = (
                 (libraries as [BazelTarget]) +
@@ -477,11 +485,14 @@ public struct PodBuildFile: SkylarkConvertible {
             return result + (filteredSpecs.contains(target.name) ? [target] : [])
         }
 
-        let extraDeps = vendoredFrameworks(withPodspec: podSpec) +
+        var podSpecDeps: [PodSpec] = subspecDependencies(podName: podSpec.name, podSpec: podSpec, allSpecs: podSpec.allSubspecs())
+
+        let extraDeps = vendoredFrameworks(withPodspec: podSpec, deps: podSpecDeps) +
             vendoredLibraries(withPodspec: podSpec)
 
-        let allRootDeps = ((defaultSubspecTargets.isEmpty ? subspecTargets :
-                    defaultSubspecTargets) + extraDeps)
+//        let allRootDeps = ((defaultSubspecTargets.isEmpty ? subspecTargets :
+//                    defaultSubspecTargets) + extraDeps)
+        let allRootDeps = extraDeps
             .filter { !($0 is AppleResourceBundle || $0 is AppleBundleImport) }
 
         let sourceLibs = makeSourceLibsV2(parentSpecs: [], spec: podSpec, extraDeps:
@@ -500,5 +511,25 @@ public struct PodBuildFile: SkylarkConvertible {
                                                            options: buildOptions,
                                                            podSpec: podSpec)
         return output
+    }
+
+    public static func subspecDependencies(podName: String, podSpec: PodSpec, allSpecs: [PodSpec]) -> [PodSpec] {
+        var subspecs = podSpec.selectedSubspecs()
+        if !podSpec.dependencies.isEmpty {
+            subspecs = podSpec.dependencies.compactMap({
+                let splitted = $0.split(separator: "/")
+                guard splitted.count == 2 else { return nil }
+                let name = splitted[0]
+                let depName = splitted[1]
+                if name == podName {
+                    return allSpecs.first(where: { $0.name == depName })
+                }
+                return nil
+            })
+        }
+        let deps = subspecs.reduce(into: [PodSpec]()) { partialResult, spec in
+            partialResult += Self.subspecDependencies(podName: podName, podSpec: spec, allSpecs: allSpecs)
+        }
+        return subspecs + deps
     }
 }

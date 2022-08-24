@@ -161,6 +161,24 @@ public func getDependencyName(fromPodDepName podDepName: String, podName: String
     }
 }
 
+public func getLocalSourceDependencies(allSpecs: [PodSpec], spec: PodSpec, podName: String) -> [PodSpec] {
+    let allSubspecs = allSpecs.reduce(into: [String: PodSpec]()) { partialResult, spec in
+        spec.subspecs.forEach({
+            partialResult[$0.name] = $0
+        })
+    }
+    return spec.dependencies.reduce(into: [PodSpec]()) { partialResult, dep in
+        let results = dep.components(separatedBy: "/")
+        if results.count > 1 && results[0] == podName {
+            // This is a local subspec reference
+            let join = results[1 ... results.count - 1].joined(separator: "/")
+            if let spec = allSubspecs[join] {
+                partialResult.append(spec)
+            }
+        }
+    }
+}
+
 /// Convert a string to a Bazel label conventional string
 public func bazelLabel(fromString string: String) -> String {
 	return string.replacingOccurrences(of: "/", with: "_")

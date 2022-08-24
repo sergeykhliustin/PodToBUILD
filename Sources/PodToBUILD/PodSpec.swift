@@ -97,6 +97,7 @@ public enum PodSpecField: String {
     case name
     case swiftVersion = "swift_version"
     case swiftVersions = "swift_versions"
+    case platforms
     case frameworks
     case weakFrameworks = "weak_frameworks"
     case excludeFiles = "exclude_files"
@@ -132,6 +133,7 @@ public enum PodSpecField: String {
 public protocol PodSpecRepresentable {
     var name: String { get }
     var swiftVersions: Set<String>? { get }
+    var platforms: [String: String]? { get }
     var podTargetXcconfig: [String: String]? { get }
     var userTargetXcconfig: [String: String]? { get }
     var sourceFiles: [String] { get }
@@ -162,6 +164,7 @@ public protocol PodSpecRepresentable {
 public struct PodSpec: PodSpecRepresentable {
     public let name: String
     public let swiftVersions: Set<String>?
+    public let platforms: [String: String]?
     public let sourceFiles: [String]
     public let excludeFiles: [String]
     public let frameworks: [String]
@@ -282,6 +285,7 @@ public struct PodSpec: PodSpecRepresentable {
 
         license = PodSpecLicense.license(fromJSON: fieldMap[.license])
 
+        platforms = try? ExtractValue(fromJSON: fieldMap[.platforms])
         xcconfig = try? ExtractValue(fromJSON: fieldMap[.xcconfig])
         podTargetXcconfig = try? ExtractValue(fromJSON: fieldMap[.podTargetXcconfig])
         userTargetXcconfig = try? ExtractValue(fromJSON: fieldMap[.userTargetXcconfig])

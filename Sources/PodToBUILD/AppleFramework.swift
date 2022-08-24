@@ -9,6 +9,7 @@ public struct AppleFramework: BazelTarget {
     public let name: String
     public let sourceFiles: AttrSet<GlobNode>
     public let moduleName: AttrSet<String>
+    public let platforms: [String: String]?
     public let deps: AttrSet<[String]>
     public let data: AttrSet<GlobNode>
     public let externalName: String
@@ -18,16 +19,17 @@ public struct AppleFramework: BazelTarget {
     public let xcconfig: AttrSet<[String : String]>
 
     public let publicHeaders: AttrSet<GlobNode>
+    public let privateHeaders: AttrSet<GlobNode>
     
-    public let sdkFrameworks: AttrSet<[String]>
-    public let weakSdkFrameworks: AttrSet<[String]>
-    public let sdkDylibs: AttrSet<[String]>
+    public let sdkFrameworks: AttrSet<Set<String>>
+    public let weakSdkFrameworks: AttrSet<Set<String>>
+    public let sdkDylibs: AttrSet<Set<String>>
+    public let objcCopts: AttrSet<[String]>
+    public let swiftCopts: AttrSet<[String]>
 
     public let isTopLevelTarget: Bool
 
-    init(parentSpecs: [PodSpec], spec: PodSpec, extraDeps: [String] = [],
-         isSplitDep: Bool = false,
-         moduleMap: ModuleMap? = nil) {
+    init(parentSpecs: [PodSpec], spec: PodSpec, extraDeps: [String] = []) {
 
         let podName = GetBuildOptions().podName
         let name = computeLibName(
@@ -37,32 +39,41 @@ public struct AppleFramework: BazelTarget {
             isSplitDep: false,
             sourceType: .swift
         )
-        self.isTopLevelTarget = parentSpecs.isEmpty && isSplitDep == false
+        self.isTopLevelTarget = parentSpecs.isEmpty
         self.name = name
-        self.sourceFiles = Self.getSources(spec: spec)
+        self.platforms = spec.platforms
 
         let externalName = getNamePrefix() + (parentSpecs.first?.name ?? spec.name)
         self.externalName = externalName
 
         let fallbackSpec = FallbackSpec(specs: [spec] +  parentSpecs)
-        sdkFrameworks = fallbackSpec.attr(\.frameworks)
-        weakSdkFrameworks = fallbackSpec.attr(\.weakFrameworks)
-        sdkDylibs = fallbackSpec.attr(\.libraries)
 
-        let moduleName: AttrSet<String> = spec.attr(\.moduleName).map {
+        let moduleName: AttrSet<String> = fallbackSpec.attr(\.moduleName).map {
             $0 ?? ""
         }
         self.moduleName = moduleName
 
-        // Lift the deps to multiplatform, then get the names of these deps.
-        let mpDeps = fallbackSpec.attr(\.dependencies)
-        let mpPodSpecDeps = mpDeps.map { $0.map {
-            getDependencyName(fromPodDepName: $0, podName:
-                podName)
-        } }
+        var localDeps = spec.selectedSubspecs()
+
+        if !isTopLevelTarget {
+            localDeps = getLocalSourceDependencies(allSpecs: parentSpecs, spec: spec, podName: podName)
+        }
+
+        sourceFiles = Self.getFilesNodes(from: spec, subspecs: localDeps, includesKeyPath: \.sourceFiles, excludesKeyPath: \.excludeFiles, fileTypes: AnyFileTypes)
+        publicHeaders = Self.getFilesNodes(from: spec, subspecs: localDeps, includesKeyPath: \.publicHeaders, excludesKeyPath: \.privateHeaders, fileTypes: HeaderFileTypes)
+        privateHeaders = Self.getFilesNodes(from: spec, subspecs: localDeps, includesKeyPath: \.privateHeaders, fileTypes: HeaderFileTypes)
+        sdkDylibs = Self.collectAttribute(from: spec, subspecs: localDeps, keyPath: \.libraries)
+        sdkFrameworks = Self.collectAttribute(from: spec, subspecs: localDeps, keyPath: \.frameworks)
+        weakSdkFrameworks = Self.collectAttribute(from: spec, subspecs: localDeps, keyPath: \.weakFrameworks)
+        let allPodSpecDeps = Self.collectAttribute(from: spec, subspecs: localDeps, keyPath: \.dependencies)
+            .map({
+                $0.map({
+                    getDependencyName(fromPodDepName: $0, podName: podName)
+                }).filter({ !$0.hasPrefix(":") })
+            })
 
         let extraDepNames = extraDeps.map { bazelLabel(fromString: ":\($0)") }
-        self.deps = AttrSet(basic: extraDepNames) <> mpPodSpecDeps
+        self.deps = AttrSet(basic: extraDepNames) <> allPodSpecDeps
 
         let swiftFlags = XCConfigTransformer.defaultTransformer(
             externalName: externalName, sourceType: .swift)
@@ -85,24 +96,18 @@ public struct AppleFramework: BazelTarget {
 
         self.xcconfig = XCConfigTransformer.defaultTransformer(externalName: externalName, sourceType: .objc).xcconfig(for: fallbackSpec)
 
-        let publicHeadersVal = fallbackSpec.attr(\.publicHeaders).unpackToMulti()
-        let privateHeadersVal = fallbackSpec.attr(\.privateHeaders).unpackToMulti()
-
-        let allSourceFiles = spec.attr(\PodSpecRepresentable.sourceFiles).unpackToMulti()
-
-        let sourceHeaders = extractFiles(fromPattern: allSourceFiles, includingFileTypes:
-                HeaderFileTypes)
-        let privateHeaders = extractFiles(fromPattern: privateHeadersVal, includingFileTypes:
-                HeaderFileTypes)
-        let publicHeaders = extractFiles(fromPattern: publicHeadersVal, includingFileTypes:
-                HeaderFileTypes)
-
-        let basePublicHeaders = sourceHeaders.zip(publicHeaders).map {
-            return Set($0.second ?? $0.first ?? [])
+        // TODO: Temp solution
+        self.objcCopts = xcconfig.map {
+            if let path = $0["HEADER_SEARCH_PATHS"] {
+                return ["-I" + path]
+            }
+            return []
         }
-        // lib/cocoapods/sandbox/file_accessor.rb
-        self.publicHeaders = basePublicHeaders.zip(privateHeadersVal).map {
-            GlobNode(include: .left($0.first ?? Set()), exclude: .left(Set($0.second ?? [])))
+        self.swiftCopts = xcconfig.map {
+            if let path = $0["HEADER_SEARCH_PATHS"] {
+                return ["-Xcc", "-I" + path]
+            }
+            return []
         }
     }
 
@@ -148,8 +153,6 @@ public struct AppleFramework: BazelTarget {
                  ].toSkylark()
                  ),
              ])
-        // TODO: Make sources conditional
-        let sourceFiles = self.sourceFiles.multi.ios?.toSkylark() ?? SkylarkNode.empty
 
         let swiftDefines = self.swiftDefines.toSkylark() .+. basicSwiftDefines
         let objcDefines = self.objcDefines.toSkylark() .+. basicObjcDefines
@@ -163,14 +166,28 @@ public struct AppleFramework: BazelTarget {
         }
 
         // TODO: Make headers conditional
-        let publicHeaders = self.publicHeaders.multi.ios ?? .empty
+        let publicHeaders = (self.publicHeaders.multi.ios ?? .empty)
+        let privateHeaders = self.privateHeaders.multi.ios ?? .empty
+
+        let allExcludeHeaders = (privateHeaders.include + publicHeaders.include).reduce(into: Set<String>()) { partialResult, value in
+            if case let .left(strings) = value {
+                partialResult.formUnion(strings)
+            }
+        }
+
+        // TODO: Make sources conditional
+        let sourceFiles = self.sourceFiles.multi.ios.map({
+            GlobNode(include: $0.include, exclude: [.left(allExcludeHeaders)])
+        }) ?? .empty
 
         let lines: [SkylarkFunctionArgument] = [
             .named(name: "name", value: name.toSkylark()),
             .named(name: "module_name", value: moduleName.toSkylark()),
             .named(name: "swift_version", value: swiftVersion.toSkylark()),
-            .named(name: "srcs", value: sourceFiles),
+            .named(name: "platforms", value: platforms.toSkylark()),
+            .named(name: "srcs", value: sourceFiles.toSkylark()),
             .named(name: "public_headers", value: publicHeaders.toSkylark()),
+            .named(name: "private_headers", value: privateHeaders.toSkylark()),
             .named(name: "deps", value: deps.toSkylark()),
             .named(name: "data", value: data.toSkylark()),
             .named(name: "swift_defines", value: swiftDefines),
@@ -179,6 +196,8 @@ public struct AppleFramework: BazelTarget {
             .named(name: "sdk_frameworks", value: sdkFrameworks.toSkylark()),
             .named(name: "weak_sdk_frameworks", value: weakSdkFrameworks.toSkylark()),
             .named(name: "sdk_dylibs", value: sdkDylibs.toSkylark()),
+            .named(name: "objc_copts", value: objcCopts.toSkylark()),
+            .named(name: "swift_copts", value: swiftCopts.toSkylark()),
             .named(name: "visibility", value: ["//visibility:public"].toSkylark())
         ]
             .filter({
@@ -196,7 +215,25 @@ public struct AppleFramework: BazelTarget {
         )
     }
 
-    private static func getSources(spec: PodSpec) -> AttrSet<GlobNode> {
+    private static func getSourcesNodes(spec: PodSpec, deps: [PodSpec] = []) -> AttrSet<GlobNode> {
+        let (implFiles, implExcludes) = Self.getSources(spec: spec, deps: deps)
+
+        return implFiles.zip(implExcludes).map {
+            GlobNode(include: .left($0.first ?? Set()), exclude: .left($0.second ?? Set()))
+        }
+    }
+
+    private static func getSources(spec: PodSpec, deps: [PodSpec] = []) -> (includes:  AttrSet<Set<String>>, excludes:  AttrSet<Set<String>>) {
+        let depsIncludes = AttrSet<Set<String>>(value: .empty)
+        let depsExcludes = AttrSet<Set<String>>(value: .empty)
+
+        let depsSources = deps.reduce((includes: depsIncludes, excludes: depsExcludes)) { partialResult, spec in
+            let sources = Self.getSources(spec: spec)
+            let includes = partialResult.includes <> sources.includes
+            let excludes = partialResult.excludes <> sources.excludes
+            return (includes, excludes)
+        }
+
         let allSourceFiles = spec.attr(\.sourceFiles)
         let implFiles = extractFiles(fromPattern: allSourceFiles, includingFileTypes: AnyFileTypes)
             .unpackToMulti()
@@ -206,10 +243,64 @@ public struct AppleFramework: BazelTarget {
         let implExcludes = extractFiles(fromPattern: allExcludes, includingFileTypes: AnyFileTypes)
             .unpackToMulti()
             .map { Set($0) }
+        return (implFiles <> depsSources.includes, implExcludes <> depsSources.excludes)
+    }
+
+    private static func getFilesNodes(from spec: PodSpec,
+                                 subspecs: [PodSpec] = [],
+                                 includesKeyPath: KeyPath<PodSpecRepresentable, [String]>,
+                                 excludesKeyPath: KeyPath<PodSpecRepresentable, [String]>? = nil,
+                                 fileTypes: Set<String>) -> AttrSet<GlobNode> {
+        let (implFiles, implExcludes) = Self.getFiles(from: spec,
+                                                      subspecs: subspecs,
+                                                      includesKeyPath: includesKeyPath,
+                                                      excludesKeyPath: excludesKeyPath,
+                                                      fileTypes: fileTypes)
 
         return implFiles.zip(implExcludes).map {
             GlobNode(include: .left($0.first ?? Set()), exclude: .left($0.second ?? Set()))
         }
+    }
+
+    private static func getFiles(from spec: PodSpec,
+                                 subspecs: [PodSpec] = [],
+                                 includesKeyPath: KeyPath<PodSpecRepresentable, [String]>,
+                                 excludesKeyPath: KeyPath<PodSpecRepresentable, [String]>? = nil,
+                                 fileTypes: Set<String>) -> (includes: AttrSet<Set<String>>, excludes: AttrSet<Set<String>>) {
+        let depsIncludes = AttrSet<Set<String>>(value: .empty)
+        let depsExcludes = AttrSet<Set<String>>(value: .empty)
+
+        let depsSources = subspecs.reduce((includes: depsIncludes, excludes: depsExcludes)) { partialResult, spec in
+            let sources = Self.getFiles(from: spec, includesKeyPath: includesKeyPath, excludesKeyPath: excludesKeyPath, fileTypes: fileTypes)
+            let includes = partialResult.includes <> sources.includes
+            let excludes = partialResult.excludes <> sources.excludes
+            return (includes, excludes)
+        }
+
+        let allFiles = spec.attr(includesKeyPath)
+        let implFiles = extractFiles(fromPattern: allFiles, includingFileTypes: fileTypes)
+            .unpackToMulti()
+            .map { Set($0) }
+
+        var implExcludes: AttrSet<Set<String>> = AttrSet.empty
+
+        if let excludesKeyPath = excludesKeyPath {
+            let allExcludes = spec.attr(excludesKeyPath)
+            implExcludes = extractFiles(fromPattern: allExcludes, includingFileTypes: fileTypes)
+                .unpackToMulti()
+                .map { Set($0) }
+        }
+
+        return (implFiles <> depsSources.includes, implExcludes <> depsSources.excludes)
+    }
+
+    static func collectAttribute(from spec: PodSpec,
+                                         subspecs: [PodSpec] = [],
+                                         keyPath: KeyPath<PodSpecRepresentable, [String]>) -> AttrSet<Set<String>> {
+        return (subspecs + [spec])
+            .reduce(into: AttrSet<Set<String>>.empty) { partialResult, spec in
+                partialResult = partialResult <> spec.attr(keyPath).unpackToMulti().map({ Set($0) })
+            }
     }
 
     private static func resolveSwiftVersion(spec: FallbackSpec) -> AttrSet<String?> {

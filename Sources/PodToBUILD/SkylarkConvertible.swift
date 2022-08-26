@@ -83,3 +83,14 @@ extension Set: SkylarkConvertible {
         return self.map{ $0 as! String }.sorted().toSkylark()
     }
 }
+
+extension Either: SkylarkConvertible where T: SkylarkConvertible, U: SkylarkConvertible {
+    public func toSkylark() -> SkylarkNode {
+        switch self {
+        case .left(let value):
+            return value.toSkylark()
+        case .right(let value):
+            return value.toSkylark()
+        }
+    }
+}

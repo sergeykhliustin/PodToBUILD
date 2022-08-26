@@ -16,7 +16,7 @@ public struct AppleFramework: BazelTarget {
     public let objcDefines: AttrSet<[String]>
     public let swiftDefines: AttrSet<[String]>
     public let swiftVersion: AttrSet<String?>
-    public let xcconfig: AttrSet<[String : String]>
+    public let xcconfig: AttrSet<[String: Either<String, [String]>]>
 
     public let publicHeaders: AttrSet<GlobNode>
     public let privateHeaders: AttrSet<GlobNode>
@@ -98,14 +98,19 @@ public struct AppleFramework: BazelTarget {
 
         // TODO: Temp solution
         self.objcCopts = xcconfig.map {
-            if let path = $0["HEADER_SEARCH_PATHS"] {
-                return ["-I" + path]
+            if let paths = $0["HEADER_SEARCH_PATHS"] {
+                return paths.fold(left: { ["-I" + $0] }, right: { $0.map({ "-I" + $0 }) })
             }
             return []
         }
         self.swiftCopts = xcconfig.map {
-            if let path = $0["HEADER_SEARCH_PATHS"] {
-                return ["-Xcc", "-I" + path]
+            if let paths = $0["HEADER_SEARCH_PATHS"] {
+                return paths.fold(left: { ["-Xcc", "-I" + $0] }, right: {
+                    $0.reduce(into: [String]()) { partialResult, value in
+                        partialResult.append("-Xcc")
+                        partialResult.append("-I" + value)
+                    }
+                })
             }
             return []
         }

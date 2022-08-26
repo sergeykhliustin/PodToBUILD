@@ -10,7 +10,9 @@ public protocol BuildOptions {
     var globalCopts: [String] { get }
     var trace: Bool { get }
     var podName: String { get }
+    var subspecs: [String] { get }
     var path: String { get }
+    var podspecPath: String { get }
 
     // Frontend options
 
@@ -29,7 +31,9 @@ public protocol BuildOptions {
 
 public struct BasicBuildOptions: BuildOptions {
     public let podName: String
+    public let subspecs: [String]
     public let path: String
+    public let podspecPath: String
     public let userOptions: [String]
     public let globalCopts: [String]
     public let trace: Bool
@@ -44,7 +48,9 @@ public struct BasicBuildOptions: BuildOptions {
     public let isDynamicFramework: Bool
 
     public init(podName: String = "",
+                subspecs: [String] = [],
                 path: String = ".",
+                podspecPath: String = "",
                 userOptions: [String] = [],
                 globalCopts: [String] = [],
                 trace: Bool = false,
@@ -58,7 +64,9 @@ public struct BasicBuildOptions: BuildOptions {
                 isDynamicFramework: Bool = false
     ) {
         self.podName = podName
+        self.subspecs = subspecs
         self.path = path
+        self.podspecPath = podspecPath
         self.userOptions = userOptions
         self.globalCopts = globalCopts
         self.trace = trace

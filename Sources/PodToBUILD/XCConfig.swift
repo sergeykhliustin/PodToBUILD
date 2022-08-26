@@ -35,6 +35,25 @@ public struct XCConfigTransformer {
         self.registry = registry
     }
 
+    func stringAsList(value: String) -> [String] {
+        return value
+            .components(separatedBy: "=\"")
+            .map {
+                let components = $0.components(separatedBy: "\"")
+                guard components.count == 2 else {
+                    return $0
+                }
+                let modifiedValue = [
+                    components.first?.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "",
+                    components.dropFirst().joined()
+                ].joined(separator: "\\\"")
+                return modifiedValue
+            }
+            .joined(separator: "=\\\"")
+            .components(separatedBy: .whitespaces)
+            .map { $0.removingPercentEncoding ?? "" }
+    }
+
     func xcconfig(forXCConfigKey key: String, XCConfigValue value: String) throws -> String {
         guard let transformer = registry[key] else {
             throw XCConfigValueTransformerError.unimplemented
@@ -142,22 +161,24 @@ public struct XCConfigTransformer {
         })
     }
 
-    public func xcconfig(forXCConfig xcconfig: AttrSet<[String: String]>) -> AttrSet<[String: String]> {
-        // TODO: Some compile flags are required to be an array
-        let tempSkippedKeys = [
+    public func xcconfig(forXCConfig xcconfig: AttrSet<[String: String]>) -> AttrSet<[String: Either<String, [String]>]> {
+        let shouldBeArray = [
             "GCC_PREPROCESSOR_DEFINITIONS",
             "OTHER_SWIFT_FLAGS",
             "OTHER_CFLAGS",
             "SWIFT_INCLUDE_PATHS"
         ]
         return xcconfig.map({
-            $0.reduce([String:String]()) { result, element in
-                guard !tempSkippedKeys.contains(element.0) else { return result }
-
+            $0.reduce([String: Either<String, [String]>]()) { result, element in
                 var result = result
-                let newValue = try? self.xcconfig(forXCConfigKey: element.0, XCConfigValue: element.1)
-                if newValue.isEmpty == false {
-                    result[element.0] = newValue
+
+                if let newValue = try? self.xcconfig(forXCConfigKey: element.key, XCConfigValue: element.value),
+                   newValue.isEmpty == false {
+                    if shouldBeArray.contains(element.key) {
+                        result[element.key] = .right(stringAsList(value: newValue))
+                    } else {
+                        result[element.key] = .left(newValue)
+                    }
                 }
                 return result
             }
@@ -339,7 +360,7 @@ public extension XCConfigTransformer {
         return self.compilerFlags(forXCConfig: xcconfig)
     }
 
-    func xcconfig(for spec: FallbackSpec) -> AttrSet<[String: String]> {
+    func xcconfig(for spec: FallbackSpec) -> AttrSet<[String: Either<String, [String]>]> {
         let xcconfig = spec.attr(\.podTargetXcconfig).map({ $0 ?? [:]})
         <> spec.attr(\.userTargetXcconfig).map({ $0 ?? [:] })
         <> spec.attr(\.xcconfig).map({ $0 ?? [:] })

@@ -121,16 +121,7 @@ extension Array where Iterator.Element == Either<Set<String>, GlobNode> {
     }
 }
 
-extension Either: SkylarkConvertible where T == Set<String>, U == GlobNode {
-    public func toSkylark() -> SkylarkNode {
-        switch self {
-        case let .left(setVal):
-            return setVal.sorted { $0 < $1 }.toSkylark()
-        case let .right(globVal):
-            return globVal.toSkylark()
-        }
-    }
-
+extension Either where T == Set<String>, U == GlobNode {
     var isEmpty: Bool {
         switch self {
         case let .left(val):

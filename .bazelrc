@@ -4,9 +4,11 @@ build \
  --spawn_strategy=local \
  --strategy=SwiftCompile=worker \
  --swiftcopt=-Xwrapped-swift=-debug-prefix-pwd-is-dot \
- --experimental_strict_action_env=true
+ --experimental_strict_action_env=true \
+ --apple_bitcode=none
 
 build --features=swift.use_global_module_cache
+build --compilation_mode=opt
 
 test \
  --spawn_strategy=local \

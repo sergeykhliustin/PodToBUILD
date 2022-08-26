@@ -13,7 +13,7 @@ objc_library(
 swift_library(
     name = "PodToBUILD",
     srcs = glob(["Sources/PodToBUILD/*.swift"]),
-    deps = [":ObjcSupport", "@podtobuild-Yams//:Yams"],
+    deps = [":ObjcSupport"],
     copts = ["-swift-version", "5"],
 )
 
@@ -28,6 +28,21 @@ swift_library(
     name = "CompilerLib",
     srcs = glob(["Sources/Compiler/*.swift"]),
     deps = [":PodToBUILD"],
+    copts = ["-swift-version", "5"],
+)
+
+# Generator
+
+macos_command_line_application(
+    name = "Generator",
+    minimum_os_version = "10.13",
+    deps = [":GeneratorLib"],
+)
+
+swift_library(
+    name = "GeneratorLib",
+    srcs = glob(["Sources/Generator/*.swift"]),
+    deps = [":PodToBUILD", "@swift-argument-parser//:ArgumentParser"],
     copts = ["-swift-version", "5"],
 )
 

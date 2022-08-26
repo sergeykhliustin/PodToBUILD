@@ -3,6 +3,10 @@ load(
     "git_repository",
     "new_git_repository",
 )
+load(
+    "@bazel_tools//tools/build_defs/repo:http.bzl",
+    "http_archive"
+)
 
 NAMESPACE_PREFIX = "podtobuild-"
 
@@ -90,6 +94,32 @@ def podtobuild_dependencies():
     dependencies of podtobuild are downloaded and that they are isolated from
     changes to those dependencies.
     """
+    http_archive(
+        name = "swift-argument-parser",
+        url = "https://github.com/apple/swift-argument-parser/archive/refs/tags/1.1.3.tar.gz",
+        strip_prefix = "swift-argument-parser-1.1.3",
+        sha256 = "e52c0ac4e17cfad9f13f87a63ddc850805695e17e98bf798cce85144764cdcaa",
+        build_file_content = """
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
+
+swift_library(
+    name = "ArgumentParser",
+    srcs = glob(["Sources/ArgumentParser/**/*.swift"]),
+    deps = [":ArgumentParserToolInfo"],
+    copts = ["-swift-version", "5"],
+    visibility = [
+        "//visibility:public"
+    ]
+)
+
+swift_library(
+    name = "ArgumentParserToolInfo",
+    srcs = glob(["Sources/ArgumentParserToolInfo/**/*.swift"]),
+    copts = ["-swift-version", "5"],
+)
+    """
+)
+
     namespaced_new_git_repository(
         name = "Yams",
         remote = "https://github.com/jpsim/Yams.git",

@@ -101,7 +101,7 @@ class ShellTask : NSObject {
                             printOutput: Bool = false) -> ShellTask {
         let path = ProcessInfo.processInfo.environment["PATH"]!
         let script = "PATH=\"\(path)\" /bin/sh -c '\(script)'"
-        return ShellTask(command: "/bin/bash", arguments: ["-c", script],
+        return ShellTask(command: "/bin/sh", arguments: ["-c", script],
                 timeout: timeout, cwd: cwd, printOutput: printOutput)
     }
 

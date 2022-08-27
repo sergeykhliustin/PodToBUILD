@@ -29,7 +29,7 @@ public struct AppleFramework: BazelTarget {
 
     public let isTopLevelTarget: Bool
 
-    init(parentSpecs: [PodSpec], spec: PodSpec, extraDeps: [String] = []) {
+    init(parentSpecs: [PodSpec], subspecs: [String], spec: PodSpec, extraDeps: [String] = []) {
 
         let podName = GetBuildOptions().podName
         let name = computeLibName(
@@ -53,7 +53,7 @@ public struct AppleFramework: BazelTarget {
         }
         self.moduleName = moduleName
 
-        var localDeps = spec.selectedSubspecs()
+        var localDeps = spec.selectedSubspecs(subspecs: subspecs)
 
         if !isTopLevelTarget {
             localDeps = getLocalSourceDependencies(allSpecs: parentSpecs, spec: spec, podName: podName)

@@ -32,57 +32,80 @@ struct MainCommand: ParsableCommand {
         let data = try NSData(contentsOfFile: absolutePath(podsJson), options: [])
         let json = try JSONDecoder().decode([String: PodConfig].self, from: data as Data)
 
-        let specifications = PodSpecification.resolve(with: Array(json.values))
-        let buildOptions = specifications.map({ $0.toBuildOptions() })
+        let specifications = PodSpecification.resolve(with: json)
 
-        let compiler: (BuildOptions) throws -> Void = { buildOptions in
+        let compiler: (PodSpecification) throws -> Void = { specification in
+            print("Generating: \(specification.name)")
             let podSpec: PodSpec
-            if buildOptions.podspecPath.hasSuffix(".json") {
-                let jsonData = try NSData(contentsOfFile: absolutePath(buildOptions.podspecPath), options: []) as Data
+            if specification.podspec.hasSuffix(".json") {
+                let jsonData = try NSData(contentsOfFile: absolutePath(specification.podspec), options: []) as Data
                 let jsonFile = try JSONSerialization.jsonObject(with: jsonData, options: .allowFragments)
                 guard let jsonPodspec = jsonFile as? JSONDict else {
-                    throw "Error parsing podspec at path \(buildOptions.podspecPath)"
+                    throw "Error parsing podspec at path \(specification.podspec)"
                 }
                 podSpec = try PodSpec(JSONPodspec: jsonPodspec)
             } else {
                 let jsonPodspec = try getJSONPodspec(shell: SystemShellContext(trace: false),
-                                                     podspecName: buildOptions.podName,
-                                                     path: absolutePath(buildOptions.podspecPath))
+                                                     podspecName: specification.name,
+                                                     path: absolutePath(specification.podspec))
                 podSpec = try PodSpec(JSONPodspec: jsonPodspec)
             }
 
             // Consider adding a split here to split out sublibs
-            let buildFile = PodBuildFile.with(podSpec: podSpec, buildOptions: buildOptions)
+            let buildFile = PodBuildFile.with(podSpec: podSpec, buildOptions: specification.toBuildOptions())
             let buildFileSkylarkCompiler = SkylarkCompiler(buildFile.toSkylark())
-            _ = buildFileSkylarkCompiler.run()
-//            print(buildFileSkylarkCompiler.run())
+            let skylarkString = buildFileSkylarkCompiler.run()
+            if printOnly {
+                print(skylarkString)
+            } else {
+                if specification.development && !FileManager.default.fileExists(atPath: absolutePath("Pods/\(specification.name)")) {
+                    try? FileManager.default.createDirectory(atPath: absolutePath("Pods/\(specification.name)"), withIntermediateDirectories: false)
+                    let contents = (try? FileManager.default.contentsOfDirectory(atPath: src)) ?? []
+                    contents.forEach({ file in
+                        let sourcePath = absolutePath(file)
+                        let symlinkPath = absolutePath("Pods/\(specification.name)/\(file)")
+                        do {
+                            try FileManager.default.createSymbolicLink(atPath: symlinkPath, withDestinationPath: sourcePath)
+                        } catch {
+                            print("Error creating symlink: \(error)")
+                        }
+                    })
+                }
+                let filePath = "Pods/\(specification.name)/BUILD.bazel"
+                if let data = skylarkString.data(using: .utf8) {
+                    try data.write(to: URL(fileURLWithPath: absolutePath(filePath)))
+                } else {
+                    throw "Error writing file: \(filePath)"
+                }
+            }
         }
 
         if concurrent {
             let dGroup = DispatchGroup()
-            buildOptions.forEach({ options in
+            specifications.forEach({ specification in
                 dGroup.enter()
                 DispatchQueue.global().async {
                     do {
-                        try compiler(options)
+                        try compiler(specification)
                     }
                     catch {
-                        print("Error generating \(options.podName): \(error)")
+                        print("Error generating \(specification.name): \(error)")
                     }
                     dGroup.leave()
                 }
             })
             dGroup.wait()
         } else {
-            buildOptions.forEach({ options in
+            specifications.forEach({ specification in
                 do {
-                    try compiler(options)
+                    try compiler(specification)
                 }
                 catch {
-                    print("Error generating \(options.podName): \(error)")
+                    print("Error generating \(specification.name): \(error)")
                 }
             })
         }
+        try Data().write(to: URL(fileURLWithPath: absolutePath("Pods/BUILD.bazel")))
     }
 
     func absolutePath(_ path: String) -> String {

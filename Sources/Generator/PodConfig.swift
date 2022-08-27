@@ -10,4 +10,5 @@ import Foundation
 struct PodConfig: Decodable {
     let name: String
     let podspec: String
+    let development: Bool
 }

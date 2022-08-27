@@ -215,7 +215,6 @@ public struct PodSpec: PodSpecRepresentable {
 
         let fieldMap: [PodSpecField: Any] = Dictionary(tuples: JSONPodspec.compactMap { k, v in
             guard let field = PodSpecField.init(rawValue: k) else {
-                fputs("WARNING: Unsupported field in Podspec \(k)\n", __stderrp)
                 return nil
             }
             return .some((field, v))
@@ -306,6 +305,21 @@ public struct PodSpec: PodSpecRepresentable {
             resultSwiftVersions.insert(swiftVersion)
         }
         self.swiftVersions = !resultSwiftVersions.isEmpty ? resultSwiftVersions : nil
+    }
+
+    public func allSubspecs(_ isSubspec: Bool = false) -> [PodSpec] {
+        return (isSubspec ? [self] : []) + self.subspecs.reduce([PodSpec]()) {
+            return $0 + $1.allSubspecs(true)
+        }
+    }
+
+    public func selectedSubspecs(subspecs: [String]) -> [PodSpec] {
+        let defaultSubspecs = Set(subspecs.isEmpty ? self.defaultSubspecs : subspecs)
+        let subspecs = allSubspecs()
+        guard !defaultSubspecs.isEmpty else {
+            return subspecs
+        }
+        return subspecs.filter { defaultSubspecs.contains($0.name) }
     }
 }
 

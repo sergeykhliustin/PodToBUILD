@@ -12,8 +12,10 @@ struct PodSpecification {
     let name: String
     let subspecs: [String]
     let podspec: String
+    let development: Bool
 
-    static func resolve(with podConfigs: [PodConfig]) -> [PodSpecification] {
+    static func resolve(with podConfigsMap: [String: PodConfig]) -> [PodSpecification] {
+        let podConfigs = Array(podConfigsMap.values)
         let (podspecPaths, subspecsByPodName) =
         podConfigs.reduce(([String: String](), [String: [String]]())) { partialResult, podConfig in
             var podspecPaths = partialResult.0
@@ -34,7 +36,7 @@ struct PodSpecification {
             return (podspecPaths, subspecsByPodName)
         }
         return podspecPaths.map({
-            PodSpecification(name: $0.key, subspecs: subspecsByPodName[$0.key] ?? [], podspec: $0.value)
+            PodSpecification(name: $0.key, subspecs: subspecsByPodName[$0.key] ?? [], podspec: $0.value, development: podConfigsMap[$0.key]?.development ?? false)
         })
     }
 
